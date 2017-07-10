@@ -1,8 +1,50 @@
-function [pref, var, error, results] = EstimateValues(input)
+function [pref, var, error, results] = EstimateValues(input, varargin)
 
-max_iter = 50;
-step = 400; % For Pref and Var
-% step_b = 0.01;
+
+%% Managing the inputs
+if nargin > 0
+   for i=1:2:nargin
+       switch varargin{i}
+           case 'baseline'
+               fit_bl        = varargin{i+1};
+           case 'maxiter'
+               max_iter      = varargin{i+1};
+           case 'last'
+               copy_last     = varargin{i+1};
+           case 'error'
+               error_limit   = varargin{i+1};
+           case 'step'
+               step          = varargin{i+1};
+           case 'baseline_step'
+               b_step        = varargin{i+1};
+           otherwise
+               fprintf('Unknown argument "%s"\n',varargin{i});
+       end
+   end
+end
+
+%% Setting to default all the unset variables.
+if notDefined('fit_bl')   
+    fit_bl      = false;
+end
+
+if notDefined('max_iter')   
+    max_iter    = 50;
+end
+
+if notDefined('copy_last')   
+    copy_last   = false;
+end
+
+if notDefined('error_limit')   
+    error_limit = 0.1;
+end
+
+if notDefined('step')   
+    step = 400;
+end
+
+%%
 results = zeros(7,max_iter-1);
 
 x = [-400 -400 -200 -200 -100 -100 0 0 100 100 200 200 400 400]';
