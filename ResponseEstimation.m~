@@ -1,7 +1,7 @@
 function [result] = ResponseEstimation(pref, var,baseline)
 warning('off','all');
 %% Define curve
-toPlot = false;
+toPlot = true;
 % Parameter
 x_pref = pref;
 FWHM = var;
@@ -50,13 +50,10 @@ end
 t_f = 0:2:35;
 y_f = zeros(36,1);
 for i=1:36
-  if(mod(i,4)==1)
+  if(mod(i,2)==1)
       y_f(i) = y_disc((i-1)/4+1);
   end
-  if(mod(i,4)==3)
-      y_f(i) = y_disc((i-3)/4+1);
-  end
-   y_f(i) = y_disc(floor((i-1)/4)+1);
+%    y_f(i) = y_disc(floor((i-1)/4)+1);
 end
 
 %% Convolve
@@ -64,7 +61,7 @@ end
 y_f = interp1((0:length(y_f)-1),y_f,0:2:(length(y_f)-1),'pchip');
 hrf = getcanonicalhrf(4,2);
 convo = conv(y_f,hrf);
-convo = convo/max(convo);
+convo = convo/max(convo)*max_y;
 
 % [~,max_val] = max(convo);
 % for i=max_val:18

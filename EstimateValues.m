@@ -1,12 +1,22 @@
 function [pref, var, error, results] = EstimateValues(input)
 
 max_iter = 50;
-step = 100;
-results = zeros(5,max_iter-1);
+step = 400; % For Pref and Var
+% step_b = 0.01;
+results = zeros(7,max_iter-1);
 
 x = [-400 -400 -200 -200 -100 -100 0 0 100 100 200 200 400 400]';
+syms a b c d;      
+% Create the equations
+hrf = getcanonicalhrf(4,2);
+convo = convSym(c + (1-c)*exp(-1/b^2*(x-a).^2),hrf);
+% grad_base_eq = sum(diff(abs(input - convo(1:18)/d),c));
+grad_pref_eq = sum(diff((input - convo(1:18)/d).^2,a));
+grad_var_eq = sum(diff((input - convo(1:18)/d).^2,b));
+
 
 pref = 100;
+baseline = 0;
 
 % Find a default value for the preffered SOA, as the equivalent SOA to the
 % index of the max value of the input.
@@ -24,41 +34,8 @@ else
         pref = -400 + 800/14*(max_input-3);
     end
 end
-
-% Look for changes of signin simple derivative, to select points that would
-% be used to define a baselin.
-fdiff = input(2:18)-input(1:17);
-first_id = 0;
-last_id = 0;
-for i=3:max_input-1
-    if(sign(fdiff(i)) ~= sign(fdiff(i-1)))
-        first_id = i;
-    end
-end
-
-for i=17:-1:max_input+1
-    if(sign(fdiff(i)) ~= sign(fdiff(i-1)))
-        last_id = i;
-    end
-end
-
-% Getting the points for the baseline
-if last_id>0 && first_id>0
-    lin = [2:first_id last_id:18];
-    baseline =  [input(2:first_id) input(last_id:18)];
-else if last_id>0
-        lin = last_id:18;
-        baseline =  input(last_id:18);
-    else if first_id>0
-            lin = 2:first_id;
-            baseline =  input(2:first_id);
-        end
-    end
-end
-
-calculated_baseline = polyfit(lin',baseline,1);
-non_baseline = setdiff(1:18,lin);
-non_baseline = setdiff(non_baseline,1:3);
+baseline = mean(input(setdiff(3:18,max_input-1:max_input+1)));
+clear max_input
 
 var = 100;
 error = 1000;
@@ -71,40 +48,84 @@ while iter < max_iter && error > 0.1
     end
     results(1,iter) = pref;
     results(2,iter) = var;
+    results(3,iter) = baseline;
     
-    esti = ResponseEstimation(pref,var);
-    esti = assembleFunctions(calculated_baseline,esti);
+    esti = ResponseEstimation(pref,var,baseline);
+    %esti = assembleFunctions(calculated_baseline,esti);
+    plot_input = [input; input(1)];
+    plot_esti = [esti esti(1)];
     figure
-    plot(0:2:34,esti,0:2:34,input);
+    plot(0:2:36,plot_esti,0:2:36,plot_input);
+    clear plot_input plot_esti
     
-    error = sum(abs(input - esti'))
-    results(3,iter) = error;
+    error = sum((input - esti').^2)
+    results(4,iter) = error;
     
     if error > 0.1
-       syms a b;
        % Update pref
-       old_pref = pref;
        var_c = var/(2*sqrt(2*log(2)));
-       hrf = getcanonicalhrf(4,2);
-       convo = convSym(exp(-1/b^2*(x-a).^2),hrf);
-       convoMax = max(vpa(subs(subs(convo,a,old_pref),b,var_c)));
-       convo = convo/convoMax;
-       poly = [0 0 0 polyval(calculated_baseline,4:18)]';
-       %base_in = input' - poly;
-       %error_f = input - convo;
-       %grad_pref_eq = sum(diff(error_f,a));
-       grad_pref_eq = sum(diff(input(non_baseline) - (poly(non_baseline) + (1-poly(non_baseline)).*convo(non_baseline)),a));
-       grad_pref = vpa(subs(subs(grad_pref_eq,a,old_pref),b,var_c))
-       results(4,iter) = grad_pref;
-       %grad_pref = sum(-(log(2)*(pref-x)*(2.^(5-(8*(x-pref).^2)/var.^2))'*(input-2.^(-8*(x-pref).^2)/var.^2))/var.^2) ;
+       old_baseline = baseline;
+       old_pref = pref;
+
+       convoMax = max(vpa(subs(subs(subs(convo,a,pref),c,baseline),b,var_c)));
+       
+       % Updating the baseline by using grid search and binomial search
+       range_base = (1/10)^(1+(iter-1)/max_iter);
+       temp_baseline = baseline;
+       for i=1:3
+           range_base = range_base/2;
+           base_p =  temp_baseline + range_base;
+           base_m =  temp_baseline - range_base;
+           esti_p = ResponseEstimation(pref,var,base_p);
+           error_p= sum((input - esti_p').^2);
+           esti_m = ResponseEstimation(pref,var,base_m);
+           error_m= sum((input - esti_m').^2);
+           if error_p<error_m
+               temp_baseline = base_p;
+               error_temp = error_p;
+           else
+               temp_baseline = base_m;
+               error_temp = error_m;
+           end
+           clear base_p base_m esti_p error_p esti_m error_m
+       end
+       if error_temp < error
+           baseline = temp_baseline;
+       end
+       clear range_base temp_baseline
+       
+       
+%        grad_base = vpa(subs(subs(subs(subs(grad_base_eq,a,pref),d,convoMax),c,old_baseline),b,var_c));
+%        results(5,iter) = grad_base;
+%        baseline = baseline - step_b*grad_base;
+%        clear grad_base
+%        if baseline>1
+%            baseline = 1;
+%        end
+%        if baseline<0
+%            baseline = 0;
+%        end
+       fprintf('Baseline : %d\n',double(baseline));
+       
+       grad_pref = vpa(subs(subs(subs(subs(grad_pref_eq,a,pref),d,convoMax),c,old_baseline),b,var_c));
+       results(6,iter) = grad_pref;
        pref = pref - step*grad_pref;
+       clear grad_pref
+       if pref>500
+           pref = 500;
+       end
+       if pref<-500
+           pref = -500;
+       end
        fprintf('Pref : %d\n',double(pref));
        % Update var
-       grad_var_eq = sum(diff(input(non_baseline) - (poly(non_baseline) + (1-poly(non_baseline)).*convo(non_baseline)),b));
-       grad_var = vpa(subs(subs(grad_var_eq,a,pref),b,var_c))
-       results(5,iter) = grad_var;
-       %grad_var = sum(-(log(2)*(old_pref-x).^2*(2.^(5-(8*(x-old_pref).^2)/var.^2))'*(input-2.^(-8*(x-old_pref).^2)/var.^2))/var.^3);
+       grad_var = vpa(subs(subs(subs(subs(grad_var_eq,a,old_pref),d,convoMax),c,old_baseline),b,var_c));
+       results(7,iter) = grad_var;
        var = var - step*grad_var;
+       if var<1
+           var = 1;
+       end
+       clear grad_var
        fprintf('var : %d\n',double(var));
     end
     iter = iter +1;
@@ -117,25 +138,20 @@ subplot(2,1,2)
 plot(0:2:35,esti);
 fprintf('Pref: %d     Var: %d ',double(pref),double(var));
 figure
-subplot(3,1,1)
+subplot(4,1,1)
 plot(results(1,:));
-subplot(3,1,2)
+subplot(4,1,2)
 plot(results(2,:));
-subplot(3,1,3)
+subplot(4,1,3)
 plot(results(3,:));
-figure
-subplot(2,1,1)
+subplot(4,1,4)
 plot(results(4,:));
-subplot(2,1,2)
+figure
+subplot(3,1,1)
 plot(results(5,:));
+subplot(3,1,2)
+plot(results(6,:));
+subplot(3,1,3)
+plot(results(7,:));
 
-end
-
-
-
-function result = assembleFunctions(line_coef, conv)
-    result = zeros(1,18);
-    result(4:18) = polyval(line_coef,4:18);
-    conv_set = 1:18;
-    result(conv_set) = result(conv_set) + (1-result(conv_set)).*conv(conv_set);
 end
